@@ -10,7 +10,7 @@ The most important scheduling rule is:
 
 For every dataset row, the launcher creates a separate `job_environments` row, `session_id`, and gateway session. It then starts the same image and runner for that single row. This keeps model calls, gateway telemetry, runtime output, and evaluation rewards tied to one session. When integrating a benchmark, do not make the runner loop over the full benchmark dataset inside one episode. Put each benchmark case in its own dataset row and let Safactory schedule the rows independently.
 
-You usually need five pieces:
+You usually need a runtime image, runner, task config, start config, and (for scored benchmarks) a rule evaluator. The integration boundary is the SAfactory adapter's input/output handling: the benchmark harness or image should already know how to execute and score one case, and onboarding should not rewrite that logic.
 
 Before adding a new environment, run the standard Geo3K Docker smoke test from the root README. That confirms the Gateway, model route, storage, Docker permissions, and evaluator flow are working. When the baseline passes, use `env/geo3k` as the reference layout for a complete runtime with dataset loading, a runner, Docker startup config, and rule evaluation.
 
@@ -18,8 +18,8 @@ Before adding a new environment, run the standard Geo3K Docker smoke test from t
 |-------|-------|------|---------|
 | Runtime image | `env_image` in the agent config. RJob deployments can override it from the start config. | Contains the agent or benchmark dependencies, the harness, and the language runtimes needed by the runner. | `myagent-image:latest`, `mybench-image:latest` |
 | Runner entrypoint | Usually `env/<name>/runner.py` or `env/<name>/runner.mjs`, invoked by `container.runner_entrypoint.command`. | Adapts Safactory to the native agent or benchmark. It reads the request, extracts `env_params.dataset`, calls the target model through the gateway, runs one task or case, and returns the result JSON. | `python /tmp/safactory-mybench-runner.py` |
-| Task config | `env/<name>/<name>_config.yaml`, passed with `--agent-config`. | Defines task rows: `env_name`, `env_image`, `dataset`, `env_num`, `env_params`, and optional evaluation settings. | `env/mybench/mybench_config.yaml` |
-| Start config | `env/<name>/<name>_start.yaml`, passed with `--agent-start-config`. | Defines how the matching runtime starts: runner entrypoint, working directory, environment variables, Docker or RJob settings, and mounts. `agent_name` must match `env_name`. | `env/mybench/mybench_start.yaml` |
+| Task config | `env/<name>/<name>_config.yaml`, passed with `--agent-config`. RJob mode also provides `<name>_config.rjob.yaml`. | Defines task rows: `env_name`, `env_image`, `dataset`, `env_num`, and `env_params`. Each dataset row is one case/episode. | `env/mybench/mybench_config.yaml`, `env/mybench/mybench_config.rjob.yaml` |
+| Start config | `env/<name>/<name>_start.yaml`, passed with `--agent-start-config`. RJob mode also provides `<name>_start.rjob.yaml`. | Defines how the matching runtime starts: runner entrypoint, working directory, environment variables, Docker or RJob settings, and mounts. `agent_name` must match `env_name`. | `env/mybench/mybench_start.yaml`, `env/mybench/mybench_start.rjob.yaml` |
 | Rule evaluator | Optional, commonly `env/<name>/rule_evaluator.py`. | Converts raw runtime metrics and the gateway trajectory into a Safactory score on the 0 to 10 scale. Simple smoke tests can omit it. Benchmarks usually should provide it. | `env/mybench/rule_evaluator.py` |
 
 Agents and benchmarks mostly differ in the runner and evaluator:
@@ -230,9 +230,6 @@ environments:
       task_family: mybench
       bench_root: /workspace/MyBench
       output_root: /workspace/Safactory/results/mybench
-      evaluation:
-        rule_evaluator: env/mybench/rule_evaluator.py
-        rule_evaluator_timeout_s: 60
 ```
 
 ```jsonl
@@ -296,7 +293,17 @@ container:
   idle_command: "tail -f /dev/null"
 ```
 
-`agent_name: mybench` must match `env_name: mybench` in `mybench_config.yaml`; otherwise the launcher cannot find the startup definition for the scheduled rows.
+`agent_name: mybench` must match `env_name: mybench` in the selected task config
+(`mybench_config.yaml` for Docker or `mybench_config.rjob.yaml` for RJob);
+otherwise the launcher cannot find the startup definition for the scheduled rows.
+
+For RJob mode, provide `mybench_config.rjob.yaml` and
+`mybench_start.rjob.yaml`, then run with `--mode rjob`. Keep
+`container.runner_entrypoint` but add the `rjob:` settings. Do not copy local
+Docker bind mounts into RJob: use cluster-accessible `rjob.mount_config` or
+`rjob.mount`, list local runner dependencies in `rjob.embedded_files`, use an
+image and storage visible to the cluster, and use a Gateway URL other than
+`127.0.0.1` or `localhost`. See [RJob Mode](../internal/rjob-mode.md).
 
 ## 6. Run A Smoke Test
 

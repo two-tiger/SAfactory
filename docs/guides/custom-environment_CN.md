@@ -10,7 +10,7 @@
 
 Launcher 会为每一行 dataset 创建独立的 `job_environments` 记录、`session_id` 和 gateway session，然后用同一个镜像和 runner 执行这一行。这样模型调用、gateway 记录、运行时输出和评测 reward 都会绑定到同一个 session。接入 benchmark 时，不要让 runner 在一个 episode 里循环整个 benchmark dataset。应该让每个 benchmark case 对应一行 dataset，由 Safactory 按行独立调度。
 
-通常需要准备五个组件：
+通常需要准备运行时镜像、runner、任务配置、启动配置和（有评分时）rule evaluator。接入的边界是 SAfactory adapter 的输入/输出处理：benchmark 单 case 的执行和评测逻辑应当已经存在于 benchmark harness 或 Docker 镜像中，接入时不重写这部分逻辑。
 
 接入新环境前，先运行根目录 README 中的标准 Geo3K Docker smoke test。它可以先验证 Gateway、模型 route、存储、Docker 权限和 evaluator 链路是否正常。基线跑通后，再以 `env/geo3k` 作为完整 runtime 参考：它包含 dataset 加载、runner、Docker 启动配置和 rule evaluation。
 
@@ -18,8 +18,8 @@ Launcher 会为每一行 dataset 创建独立的 `job_environments` 记录、`se
 |------|------|------|------|
 | 运行时镜像 | agent config 中的 `env_image`。RJob 部署可以在 start config 中覆盖。 | 包含 agent 或 benchmark 依赖、harness，以及 runner 需要的语言运行时。 | `myagent-image:latest`、`mybench-image:latest` |
 | Runner entrypoint | 通常是 `env/<name>/runner.py` 或 `env/<name>/runner.mjs`，由 `container.runner_entrypoint.command` 调用。 | 连接 Safactory 与原生 agent 或 benchmark。它读取 request，取出 `env_params.dataset`，通过 gateway 调用被测模型，执行一个任务或 case，并返回结果 JSON。 | `python /tmp/safactory-mybench-runner.py` |
-| 任务配置 | `env/<name>/<name>_config.yaml`，通过 `--agent-config` 传入。 | 定义任务行：`env_name`、`env_image`、`dataset`、`env_num`、`env_params`，以及可选评测配置。 | `env/mybench/mybench_config.yaml` |
-| 启动配置 | `env/<name>/<name>_start.yaml`，通过 `--agent-start-config` 传入。 | 定义同名运行时如何启动：runner entrypoint、工作目录、环境变量、Docker 或 RJob 参数以及挂载。`agent_name` 必须匹配 `env_name`。 | `env/mybench/mybench_start.yaml` |
+| 任务配置 | `env/<name>/<name>_config.yaml`，通过 `--agent-config` 传入。RJob 模式另提供 `<name>_config.rjob.yaml`。 | 定义任务行：`env_name`、`env_image`、`dataset`、`env_num` 和 `env_params`。每行 dataset 对应一个 case/episode。 | `env/mybench/mybench_config.yaml`、`env/mybench/mybench_config.rjob.yaml` |
+| 启动配置 | `env/<name>/<name>_start.yaml`，通过 `--agent-start-config` 传入。RJob 模式另提供 `<name>_start.rjob.yaml`。 | 定义同名运行时如何启动：runner entrypoint、工作目录、环境变量、Docker 或 RJob 参数以及挂载。`agent_name` 必须匹配 `env_name`。 | `env/mybench/mybench_start.yaml`、`env/mybench/mybench_start.rjob.yaml` |
 | Rule evaluator | 可选，常见路径为 `env/<name>/rule_evaluator.py`。 | 把运行时写入的原始 `metrics` 和 gateway 轨迹转换为 Safactory 的 0 到 10 分。简单冒烟测试可以省略，benchmark 通常建议提供。 | `env/mybench/rule_evaluator.py` |
 
 Agent 和 benchmark 的差别主要体现在 runner 和 evaluator：
@@ -230,9 +230,6 @@ environments:
       task_family: mybench
       bench_root: /workspace/MyBench
       output_root: /workspace/Safactory/results/mybench
-      evaluation:
-        rule_evaluator: env/mybench/rule_evaluator.py
-        rule_evaluator_timeout_s: 60
 ```
 
 ```jsonl
@@ -296,7 +293,17 @@ container:
   idle_command: "tail -f /dev/null"
 ```
 
-`agent_name: mybench` 必须与 `mybench_config.yaml` 中的 `env_name: mybench` 一致，否则 launcher 找不到这些任务行对应的启动定义。
+`agent_name: mybench` 必须与所选任务配置（Docker 的
+`mybench_config.yaml` 或 RJob 的 `mybench_config.rjob.yaml`）中的
+`env_name: mybench` 一致，否则 launcher 找不到这些任务行对应的启动定义。
+
+如果选择 RJob 模式，需要分别保存 `mybench_config.rjob.yaml` 和
+`mybench_start.rjob.yaml`，并使用 `--mode rjob`。RJob start config 仍然保留
+`container.runner_entrypoint`，但增加 `rjob:` 配置；本地 Docker 的
+`container.mounts` 不应直接复制到 RJob，应改为集群可访问的
+`rjob.mount_config`/`rjob.mount`。runner 依赖的本地文件要列在
+`rjob.embedded_files` 中，镜像和结果存储必须能被 RJob 集群访问，Gateway URL
+也不能使用 `127.0.0.1` 或 `localhost`。详见[RJob 模式](../internal/rjob-mode_CN.md)。
 
 ## 6. 运行冒烟测试
 

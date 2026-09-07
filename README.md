@@ -51,33 +51,81 @@ https://github.com/user-attachments/assets/4c551b27-ce4d-4fc8-8df6-d6dc8100cc88
 
 ## <a id="agent-skill"></a>🧩 Agent Skill Quick Start
 
-This repository includes a lightweight Agent skill that helps agents use SAfactory through the standard workflows:
+This repository includes a lightweight Agent skill that helps an Agent onboard a benchmark and run a minimal evaluation through the standard workflow:
 
 ```text
 skills/safactory-workflows/SKILL.md
 ```
 
-It covers three common requests:
+This skill currently covers onboarding a new benchmark and running a minimal single-case evaluation in Docker or RJob mode.
 
-- onboard a new benchmark or custom environment into SAfactory;
-- run Docker-mode evaluation for a selected environment;
-- start GRPO / RL training for a selected environment.
+### <a id="benchmark-onboarding-prompt"></a>Benchmark Onboarding Prompt
 
-When working with an Agent, use prompts such as:
+Before onboarding, prepare:
+
+1. Prepare **1–2 test cases** and make sure the benchmark's native single-case command works independently.
+2. Choose the mode to onboard: `docker` (local image) or `rjob` (cluster RJob).
+3. Prepare and provide the Agent with:
+
+   - environment name;
+   - local benchmark source path or link;
+   - path to the test dataset;
+   - the native single-case command, or the corresponding section in the benchmark README;
+   - an accessible Docker image address;
+   - native benchmark result/output file path or naming rule;
+   - native score/reward location, range, and pass condition.
+
+4. We recommend filling in the provided prompt and sending it to the Agent. The Agent will inspect the benchmark source/README and SAfactory docs, then implement the adapter, configs, and evaluator.
+5. The Agent runs a minimal smoke test with 1–2 cases. Onboarding is complete when the runner result JSON, native benchmark output file, Gateway trajectory, and final `0–10` reward are all present and traceable to the same case.
+
+RJob users also need to prepare a Gateway URL. Do not use `localhost` or `127.0.0.1` as the Gateway address from an RJob container.
+
+<details>
+<summary>Expand to get the Benchmark Onboarding Prompt</summary>
 
 ```text
-Use skills/safactory-workflows to help me onboard this benchmark into SAfactory.
+Use skills/safactory-workflows to onboard the following benchmark into SAfactory.
+
+[Execution mode] (required; choose one)
+- mode: [docker / rjob]
+
+[Benchmark]
+- environment name (for example, mybench): ____________________
+- benchmark source or checkout path/repository: ____________________
+- dataset path: ____________________
+- one dataset-row schema/field description: ____________________
+- 1–2 smoke-test case IDs or dataset rows: ____________________
+- native single-case benchmark command: ____________________
+- if the command is defined in a README, file and section: ____________________
+- Docker image, if one already exists: ____________________
+
+[Results and scoring]
+- native benchmark result/output file path or naming rule: ____________________
+- field or file containing the native score/reward: ____________________
+- score/reward range, meaning, and pass condition: ____________________
+
+[Scope]
+- Start with only the 1–2 cases above.
+- Implement the SAfactory adapter boundary: read the request, take
+  env_params.dataset, call the model through the Gateway, invoke the existing
+  native single-case command, read its result, and return a
+  SimulationStartResult JSON object.
+- Do not rewrite the benchmark single-case execution or evaluation logic
+  already inside the Docker image.
+- Report and verify the runner result JSON, native benchmark output file,
+  Gateway trajectory, and final 0–10 reward.
+
+First inspect the benchmark source/README and
+docs/guides/custom-environment.md, then edit the files required by the selected
+mode. If information is missing, ask only for that field; do not guess the
+benchmark command or scoring rule.
 ```
 
-```text
-Use the safactory-workflows skill to run geo3k evaluation in Docker mode.
-```
+</details>
 
-```text
-Use the safactory-workflows skill to start GRPO training for my_env.
-```
+The Agent owns the SAfactory adapter boundary, not the benchmark's internal single-case logic. See [Custom Environments](docs/guides/custom-environment.md) and the skill's [integration reference](skills/safactory-workflows/references/environment-integration.md) for file responsibilities, the runner/result contract, and Docker/RJob differences.
 
-The skill does not replace the docs. It guides the Agent to read `docs/guides/`, `docs/reference/`, and the root README as needed, while using the standard `env/geo3k/` environment as the reference implementation. If your Agent supports local skill discovery, add `skills/safactory-workflows/` to its skill search path; otherwise mention this path explicitly in the request.
+When you use this skill, the Agent reads `docs/guides/`, `docs/reference/`, and the root README as needed, using the standard `env/geo3k/` environment as its reference implementation. You only need to provide the benchmark information listed above; if your Agent cannot discover local skills automatically, include `skills/safactory-workflows/` explicitly in the prompt.
 
 ## <a id="quick-start"></a>🚀 Quick Start
 
